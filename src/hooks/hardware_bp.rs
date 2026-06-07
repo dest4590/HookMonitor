@@ -12,7 +12,10 @@ use windows::Win32::System::Diagnostics::Debug::{
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
 };
-use windows::Win32::System::Threading::{GetCurrentProcessId, GetCurrentThreadId, OpenThread, ResumeThread, SuspendThread, THREAD_ALL_ACCESS};
+use windows::Win32::System::Threading::{
+    GetCurrentProcessId, GetCurrentThreadId, OpenThread, ResumeThread, SuspendThread,
+    THREAD_ALL_ACCESS,
+};
 
 // STATUS_SINGLE_STEP is the exception code raised when a hardware breakpoint fires
 const STATUS_SINGLE_STEP: i32 = 0x80000004u32 as i32;
@@ -123,14 +126,16 @@ pub unsafe fn apply_breakpoints_to_thread(h_thread: HANDLE) {
     }
 
     let mut ctx = CONTEXT::default();
-    // need both debug regs and control regs for the thread context
     ctx.ContextFlags = CONTEXT_FLAGS(CTX_FULL_DEBUG);
 
     let suspend_count = SuspendThread(h_thread);
     let suspended = suspend_count != u32::MAX;
 
+    if suspended {
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+
     if GetThreadContext(h_thread, &mut ctx).is_err() {
-        log_debug("apply_breakpoints_to_thread: GetThreadContext failed");
         if suspended {
             let _ = ResumeThread(h_thread);
         }
@@ -315,7 +320,7 @@ pub unsafe fn clear_all_breakpoints() {
                     if let Ok(h_thread) = OpenThread(THREAD_ALL_ACCESS, false, entry.th32ThreadID) {
                         let mut ctx = CONTEXT::default();
                         ctx.ContextFlags = CONTEXT_FLAGS(CTX_FULL_DEBUG);
-                        
+
                         let suspend_count = SuspendThread(h_thread);
                         let suspended = suspend_count != u32::MAX;
 
@@ -327,7 +332,7 @@ pub unsafe fn clear_all_breakpoints() {
                             ctx.Dr3 = 0;
                             let _ = SetThreadContext(h_thread, &ctx);
                         }
-                        
+
                         if suspended {
                             let _ = ResumeThread(h_thread);
                         }

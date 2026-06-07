@@ -25,9 +25,16 @@ pub unsafe extern "system" fn hooked(
     let path = lp_file_name
         .to_string()
         .unwrap_or_else(|_| "INVALID_UTF16".into());
-    if !IN_HOOK.with(|h| h.get()) {
+
+    let path_lower = path.to_lowercase();
+    let should_log = !path_lower.contains("c:\\users\\public\\hook_monitor");
+
+    if !IN_HOOK.with(|h| h.get()) && should_log {
         IN_HOOK.with(|h| h.set(true));
-        log_hook("CreateFileW", &format!("-> Opening file: {}", path.yellow()));
+        log_hook(
+            "CreateFileW",
+            &format!("-> Opening file: {}", path.yellow()),
+        );
         IN_HOOK.with(|h| h.set(false));
     }
 
