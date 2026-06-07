@@ -1,7 +1,7 @@
 use crate::hooks::common::*;
 use crate::{install_detour, remove_detour};
 
-// --- RegOpenKeyExW ---
+// regopenkeyexw
 pub type FnRegOpenKeyExW =
     unsafe extern "system" fn(HKEY, PCWSTR, u32, REG_SAM_FLAGS, *mut HKEY) -> i32;
 static HOOK_ROK: Mutex<Option<GenericDetour<FnRegOpenKeyExW>>> = Mutex::new(None);
@@ -44,8 +44,14 @@ pub unsafe extern "system" fn hooked_reg_open_key_ex_w(
 pub unsafe fn install(_k32: HMODULE) -> Result<(), String> {
     let advapi = LoadLibraryW(windows::core::w!("advapi32.dll"))
         .map_err(|_| "Failed to load advapi32.dll")?;
-    
-    install_detour!(advapi, "RegOpenKeyExW", FnRegOpenKeyExW, hooked_reg_open_key_ex_w, &HOOK_ROK);
+
+    install_detour!(
+        advapi,
+        "RegOpenKeyExW",
+        FnRegOpenKeyExW,
+        hooked_reg_open_key_ex_w,
+        &HOOK_ROK
+    );
     Ok(())
 }
 

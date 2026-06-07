@@ -55,19 +55,20 @@ pub fn log_debug(msg: &str) {
 
 pub fn log_hook(name: &str, details: &str) {
     let now = Local::now().format("%H:%M:%S%.3f");
-    if !name.contains("GetMessage")
-        && !name.contains("CreateWindow")
-        && !name.contains("PeekMessage")
+    let clean_name = name.trim_start_matches("[HWBP] ").trim();
+
+    if !clean_name.contains("GetMessage")
+        && !clean_name.contains("CreateWindow")
+        && !clean_name.contains("PeekMessage")
     {
-        log_debug(&format!("log_hook: {name} — {details}"));
+        log_debug(&format!("log_hook: {clean_name} — {details}"));
     }
 
-    if !name.contains("GetMessage") && !name.contains("PeekMessage") {
+    if !clean_name.contains("GetMessage") && !clean_name.contains("PeekMessage") {
         println!(
-            "{} {} {} {}",
+            "{} {} {}",
             format!("[{now}]").bright_black(),
-            "[Hooked]".red().bold(),
-            name.green().bold(),
+            clean_name.cyan().bold(),
             details
         );
     }

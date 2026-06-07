@@ -1,11 +1,11 @@
 use crate::hooks::common::*;
 use crate::{install_detour, remove_detour};
 
-// --- GetProcAddress ---
+// getprocaddress
 pub type FnGetProcAddress = unsafe extern "system" fn(HMODULE, PCSTR) -> *const std::ffi::c_void;
 static HOOK_GPA: Mutex<Option<GenericDetour<FnGetProcAddress>>> = Mutex::new(None);
 
-// --- LoadLibraryW ---
+// loadlibraryw
 pub type FnLoadLibraryW = unsafe extern "system" fn(PCWSTR) -> HMODULE;
 static HOOK_LL: Mutex<Option<GenericDetour<FnLoadLibraryW>>> = Mutex::new(None);
 
@@ -24,7 +24,7 @@ pub unsafe extern "system" fn hooked_get_proc_address(
 
     if !IN_HOOK.with(|h| h.get()) {
         IN_HOOK.with(|h| h.set(true));
-        log_hook("GetProcAddress", &format!("Symbol: {}", proc_name.cyan()));
+        log_hook("GetProcAddress", &format!("-> Resolving symbol: {}", proc_name.cyan()));
         IN_HOOK.with(|h| h.set(false));
     }
 
@@ -50,7 +50,7 @@ pub unsafe extern "system" fn hooked_load_library_w(lp_lib_file_name: PCWSTR) ->
         .unwrap_or_else(|_| "INVALID_UTF16".into());
     if !IN_HOOK.with(|h| h.get()) {
         IN_HOOK.with(|h| h.set(true));
-        log_hook("LoadLibraryW", &format!("Library: {}", lib_name.magenta()));
+        log_hook("LoadLibraryW", &format!("-> Loading library: {}", lib_name.magenta()));
         IN_HOOK.with(|h| h.set(false));
     }
 
@@ -71,8 +71,20 @@ pub unsafe extern "system" fn hooked_load_library_w(lp_lib_file_name: PCWSTR) ->
 }
 
 pub unsafe fn install(k32: HMODULE) -> Result<(), String> {
-    install_detour!(k32, "GetProcAddress", FnGetProcAddress, hooked_get_proc_address, &HOOK_GPA);
-    install_detour!(k32, "LoadLibraryW", FnLoadLibraryW, hooked_load_library_w, &HOOK_LL);
+    install_detour!(
+        k32,
+        "GetProcAddress",
+        FnGetProcAddress,
+        hooked_get_proc_address,
+        &HOOK_GPA
+    );
+    install_detour!(
+        k32,
+        "LoadLibraryW",
+        FnLoadLibraryW,
+        hooked_load_library_w,
+        &HOOK_LL
+    );
     Ok(())
 }
 

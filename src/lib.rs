@@ -2,6 +2,7 @@ mod console;
 pub mod hooks;
 
 use colored::*;
+use std::env;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, Ordering};
 use windows::core::BOOL;
@@ -37,6 +38,27 @@ pub extern "system" fn DllMain(_module: HMODULE, reason: u32, _reserved: *mut c_
 unsafe extern "system" fn init_thread(_param: *mut c_void) -> u32 {
     console::alloc_console();
 
+    let stealth_mode_str =
+        env::var("HOOK_MONITOR_STEALTH_MODE").unwrap_or_else(|_| "hybrid".to_string());
+
+        let stealth_mode = match stealth_mode_str.to_lowercase().as_str() {
+        "inline" => hooks::stealth::StealthMode::Inline,
+        "hardware-breakpoint" => hooks::stealth::StealthMode::HardwareBreakpoint,
+        "page-guard" => hooks::stealth::StealthMode::PageGuard,
+        _ => hooks::stealth::StealthMode::Hybrid,
+    };
+
+    let config = hooks::stealth::StealthConfig {
+        mode: stealth_mode,
+        enable_memory_cloak: true,
+        enable_syscall_monitor: true,
+        enable_hook_hiding: true,
+    };
+
+    if let Err(e) = hooks::stealth::set_stealth_config(config) {
+        eprintln!("[!] Failed to set stealth config: {}", e);
+    }
+
     let results = hooks::install_all_hooks();
     let successful = results.iter().filter(|r| r.success).count();
     let total = results.len();
@@ -45,8 +67,8 @@ unsafe extern "system" fn init_thread(_param: *mut c_void) -> u32 {
         println!(
             "{}",
             format!(
-                "[✓] Hook Monitor initialized: {}/{} hooks installed",
-                successful, total
+                "[✓] Hook Monitor initialized | Mode: {:?} ({} / {} hooks active)",
+                stealth_mode, successful, total
             )
             .green()
             .bold()

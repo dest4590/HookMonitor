@@ -118,7 +118,7 @@ fn inject_into_process(process: HANDLE, dll_path: &Path) -> Result<(), String> {
             return Err("Failed to write DLL path to target process memory".to_string());
         }
 
-        println!("[+] DLL path written to remote memory");
+
 
         let kernel32 = match GetModuleHandleW(windows::core::w!("kernel32.dll")) {
             Ok(handle) => handle,
@@ -149,36 +149,20 @@ fn inject_into_process(process: HANDLE, dll_path: &Path) -> Result<(), String> {
             }
         };
 
-        println!("[+] Remote thread created");
-
         let wait_result = WaitForSingleObject(thread_handle, 10000);
         match wait_result.0 {
             0 => {
-                println!("[+] Remote thread completed");
-
                 let mut exit_code = 0u32;
                 if GetExitCodeThread(thread_handle, &mut exit_code).is_ok() {
                     if exit_code == 0 {
-                        println!("[!] ERROR: LoadLibraryW failed (returned NULL/0)");
-                        println!("[!] The DLL was not loaded successfully into the target process");
                         return Err("DLL failed to load - LoadLibraryW returned NULL".to_string());
-                    } else {
-                        println!(
-                            "[✓] LoadLibraryW succeeded (module handle: 0x{:X})",
-                            exit_code
-                        );
                     }
                 }
             }
             258 => {
                 println!("[!] Warning: Remote thread wait timed out");
             }
-            _ => {
-                println!(
-                    "[!] Warning: Remote thread wait returned unexpected status: {}",
-                    wait_result.0
-                );
-            }
+            _ => {}
         }
 
         Ok(())
@@ -247,11 +231,14 @@ fn main() {
             Ok(path) => path,
             Err(e) => {
                 eprintln!("[!] Error: {}", e);
-                eprintln!("[!] Usage: injector.exe [dll_path] <target_exe|process_name>");
+                eprintln!(
+                    "[!] Usage: injector.exe [dll_path] <target_exe|process_name> [--mode MODE]"
+                );
+                eprintln!("[!] Modes: inline, hardware-breakpoint, page-guard, hybrid (default)");
                 eprintln!("[!] Examples:");
-                eprintln!("[!]   injector.exe hook_monitor.dll .\\anarchy.exe  (run and inject)");
-                eprintln!("[!]   injector.exe hook_monitor.dll anarchy         (find and inject)");
-                eprintln!("[!]   injector.exe hook_monitor.dll anarchy.exe     (run and inject)");
+                eprintln!("[!]   injector.exe hook_monitor.dll .\\anarchy.exe");
+                eprintln!("[!]   injector.exe hook_monitor.dll anarchy --mode hybrid");
+                eprintln!("[!]   injector.exe hook_monitor.dll app.exe --mode hardware-breakpoint");
                 std::process::exit(1);
             }
         }
@@ -266,20 +253,39 @@ fn main() {
         &args[2]
     } else {
         eprintln!("[!] Error: Target executable or process name required");
-        eprintln!("[!] Usage: injector.exe [dll_path] <target_exe|process_name>");
+        eprintln!("[!] Usage: injector.exe [dll_path] <target_exe|process_name> [--mode MODE]");
+        eprintln!("[!] Modes: inline, hardware-breakpoint, page-guard, hybrid (default)");
         eprintln!("[!] Examples:");
-        eprintln!("[!]   injector.exe hook_monitor.dll .\\anarchy.exe  (run and inject)");
-        eprintln!("[!]   injector.exe hook_monitor.dll anarchy         (find and inject)");
-        eprintln!("[!]   injector.exe hook_monitor.dll anarchy.exe     (run and inject)");
+        eprintln!("[!]   injector.exe hook_monitor.dll .\\anarchy.exe");
+        eprintln!("[!]   injector.exe hook_monitor.dll anarchy --mode hybrid");
+        eprintln!("[!]   injector.exe hook_monitor.dll app.exe --mode hardware-breakpoint");
         std::process::exit(1);
     };
 
-    println!("[*] Hook Monitor Injector");
-    println!("[*] DLL: {}", dll_path.display());
+    let mut stealth_mode = "hybrid".to_string();
+    if args.len() > 3 && args[3] == "--mode" && args.len() > 4 {
+        let mode = &args[4].to_lowercase();
+        if matches!(
+            mode.as_str(),
+            "inline" | "hardware-breakpoint" | "page-guard" | "hybrid"
+        ) {
+            stealth_mode = mode.clone();
+        } else {
+            eprintln!("[!] Error: Invalid stealth mode '{}'", mode);
+            eprintln!("[!] Valid modes: inline, hardware-breakpoint, page-guard, hybrid");
+            std::process::exit(1);
+        }
+    }
 
-    let (process_handle, is_attaching) = if Path::new(target).exists() {
-        println!("[*] Target: {} (running)", target);
+    println!(
+        "[*] Injecting {} into {} (Mode: {})",
+        dll_path.file_name().unwrap_or_else(|| dll_path.as_os_str()).to_string_lossy(),
+        target,
+        stealth_mode
+    );
+    env::set_var("HOOK_MONITOR_STEALTH_MODE", &stealth_mode);
 
+    let (process_handle, main_thread_handle, is_attaching) = if Path::new(target).exists() {
         unsafe {
             let startup_info = STARTUPINFOW::default();
             let mut process_info = PROCESS_INFORMATION::default();
@@ -303,9 +309,11 @@ fn main() {
                 std::process::exit(1);
             }
 
-            println!("[+] Process created (PID: {})", process_info.dwProcessId);
-            ResumeThread(process_info.hThread);
-            (process_info.hProcess, false)
+            println!(
+                "[✓] Created suspended process (PID: {})",
+                process_info.dwProcessId
+            );
+            (process_info.hProcess, Some(process_info.hThread), false)
         }
     } else {
         println!("[*] Target: {} (finding process)", target);
@@ -324,7 +332,7 @@ fn main() {
 
         unsafe {
             match OpenProcess(PROCESS_ALL_ACCESS, false, pid) {
-                Ok(handle) => (handle, true),
+                Ok(handle) => (handle, None, true),
                 Err(_) => {
                     eprintln!("[!] Error: Failed to open process with PID {}", pid);
                     std::process::exit(1);
@@ -336,12 +344,24 @@ fn main() {
     match inject_into_process(process_handle, &dll_path) {
         Ok(_) => {
             println!("[✓] DLL injected successfully!");
+            if let Some(h_thread) = main_thread_handle {
+                println!("[*] Resuming target main thread...");
+                unsafe {
+                    let _ = ResumeThread(h_thread);
+                    let _ = windows::Win32::Foundation::CloseHandle(h_thread);
+                }
+            }
             if is_attaching {
                 println!("[*] Opening console window...\n");
                 find_and_tail_log();
             }
         }
         Err(e) => {
+            if let Some(h_thread) = main_thread_handle {
+                unsafe {
+                    let _ = windows::Win32::Foundation::CloseHandle(h_thread);
+                }
+            }
             eprintln!("[!] Error: {}", e);
             std::process::exit(1);
         }

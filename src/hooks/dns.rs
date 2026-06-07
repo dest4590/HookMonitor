@@ -6,7 +6,7 @@ use windows::core::{PCSTR, PCWSTR};
 use windows::Win32::Foundation::HMODULE;
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 
-// --- getaddrinfo (ANSI) ---
+// getaddrinfo (ansi)
 pub type FnGetAddrInfoA = unsafe extern "system" fn(PCSTR, PCSTR, *const u8, *mut *mut u8) -> i32;
 static HOOK_GETADDRINFO_A: Mutex<Option<GenericDetour<FnGetAddrInfoA>>> = Mutex::new(None);
 
@@ -41,7 +41,7 @@ pub unsafe extern "system" fn hooked_getaddrinfo_a(
     )
 }
 
-// --- getaddrinfo (Wide/Unicode) ---
+// getaddrinfo (wide/unicode)
 pub type FnGetAddrInfoW = unsafe extern "system" fn(PCWSTR, PCWSTR, *const u8, *mut *mut u8) -> i32;
 static HOOK_GETADDRINFO_W: Mutex<Option<GenericDetour<FnGetAddrInfoW>>> = Mutex::new(None);
 
@@ -66,7 +66,7 @@ pub unsafe extern "system" fn hooked_getaddrinfo_w(
     )
 }
 
-// --- gethostbyname (ANSI) ---
+// gethostbyname (ansi)
 pub type FnGetHostByName = unsafe extern "system" fn(PCSTR) -> *const u8;
 static HOOK_GETHOSTBYNAME: Mutex<Option<GenericDetour<FnGetHostByName>>> = Mutex::new(None);
 

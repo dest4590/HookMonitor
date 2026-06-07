@@ -36,19 +36,7 @@ pub unsafe extern "system" fn hooked_virtual_alloc(
     fl_allocation_type: VIRTUAL_ALLOCATION_TYPE,
     fl_protect: PAGE_PROTECTION_FLAGS,
 ) -> *mut std::ffi::c_void {
-    if !IN_HOOK.with(|h| h.get()) {
-        IN_HOOK.with(|h| h.set(true));
-        log_hook(
-            "VirtualAlloc",
-            &format!(
-                "Addr: {:?}, Size: {} bytes, Type: {:?}, Protect: {:?}",
-                lp_address, dw_size, fl_allocation_type, fl_protect
-            ),
-        );
-        IN_HOOK.with(|h| h.set(false));
-    }
-
-    match HOOK_VA.lock() {
+    let res = match HOOK_VA.lock() {
         Ok(guard) => guard.as_ref().map_or_else(
             || std::ptr::null_mut(),
             |detour| detour.call(lp_address, dw_size, fl_allocation_type, fl_protect),
@@ -61,7 +49,25 @@ pub unsafe extern "system" fn hooked_virtual_alloc(
                 |detour| detour.call(lp_address, dw_size, fl_allocation_type, fl_protect),
             )
         }
+    };
+
+    if !res.is_null() && !IN_HOOK.with(|h| h.get()) {
+        IN_HOOK.with(|h| h.set(true));
+        let addr_val = res as usize;
+        // Suppress system/module region allocations (0x7ff...) to reduce VMProtect init noise
+        if addr_val < 0x7FF0_0000_0000_usize {
+            log_hook(
+                "VirtualAlloc",
+                &format!(
+                    "Addr: {:?}, Size: {} bytes, Type: {:?}, Protect: {:?}",
+                    lp_address, dw_size, fl_allocation_type, fl_protect
+                ),
+            );
+        }
+        IN_HOOK.with(|h| h.set(false));
     }
+
+    res
 }
 
 pub unsafe extern "system" fn hooked_virtual_alloc_ex(
@@ -165,9 +171,27 @@ pub unsafe extern "system" fn hooked_write_process_memory(
 }
 
 pub unsafe fn install(k32: HMODULE) -> Result<(), String> {
-    install_detour!(k32, "VirtualAlloc", FnVirtualAlloc, hooked_virtual_alloc, &HOOK_VA);
-    install_detour!(k32, "VirtualAllocEx", FnVirtualAllocEx, hooked_virtual_alloc_ex, &HOOK_VAE);
-    install_detour!(k32, "WriteProcessMemory", FnWriteProcessMemory, hooked_write_process_memory, &HOOK_WPM);
+    install_detour!(
+        k32,
+        "VirtualAlloc",
+        FnVirtualAlloc,
+        hooked_virtual_alloc,
+        &HOOK_VA
+    );
+    install_detour!(
+        k32,
+        "VirtualAllocEx",
+        FnVirtualAllocEx,
+        hooked_virtual_alloc_ex,
+        &HOOK_VAE
+    );
+    install_detour!(
+        k32,
+        "WriteProcessMemory",
+        FnWriteProcessMemory,
+        hooked_write_process_memory,
+        &HOOK_WPM
+    );
     Ok(())
 }
 

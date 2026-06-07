@@ -27,7 +27,7 @@ pub unsafe extern "system" fn hooked(
         .unwrap_or_else(|_| "INVALID_UTF16".into());
     if !IN_HOOK.with(|h| h.get()) {
         IN_HOOK.with(|h| h.set(true));
-        log_hook("CreateFileW", &format!("Path: {}", path.yellow()));
+        log_hook("CreateFileW", &format!("-> Opening file: {}", path.yellow()));
         IN_HOOK.with(|h| h.set(false));
     }
 

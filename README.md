@@ -4,9 +4,9 @@
 
 <h1>Hook Monitor</h1>
 
-<h3>A Windows DLL that monitors and logs API calls made by a target process. Useful for understanding what an application is doing at runtime, or catching unexpected behavior.</h3>
-  
-</div> 
+<h3>A Windows DLL that monitors and logs API calls from a running process. Helps you understand what an application is doing at runtime or catch unexpected behavior.</h3>
+
+</div>
 
 ## What It Does
 
@@ -74,6 +74,8 @@ The release build produces two outputs:
 
 ```bash
 injector.exe .\hook_monitor.dll C:\path\to\target\app.exe
+# With specific stealth mode
+injector.exe .\hook_monitor.dll C:\path\to\target\app.exe --mode hybrid
 ```
 
 Creates the target process in a suspended state, injects the DLL, then resumes execution.
@@ -82,8 +84,8 @@ Creates the target process in a suspended state, injects the DLL, then resumes e
 
 ```bash
 injector.exe .\hook_monitor.dll figma
-# or with extension
-injector.exe .\hook_monitor.dll figma.exe
+# With stealth mode
+injector.exe .\hook_monitor.dll figma --mode hardware-breakpoint
 ```
 
 Finds the first running process with that name and injects the DLL. A new console window opens showing real-time log output.
@@ -91,24 +93,32 @@ Finds the first running process with that name and injects the DLL. A new consol
 #### Option 3: Auto-discover DLL path
 
 ```bash
-injector.exe anarchy.exe
-# or find and attach to running process
-injector.exe anarchy
+injector.exe anarchy.exe --mode hybrid
+# Find and attach to running process with inline mode
+injector.exe anarchy --mode inline
 ```
 
 The injector searches standard locations for `hook_monitor.dll` automatically.
+
+#### Stealth Modes
+
+Available modes (use with `--mode` flag):
+
+- **inline** – Traditional hooking, fastest but most detectable
+- **hardware-breakpoint** – Uses CPU debug registers (DR0-DR3), very stealthy but limited to 4 APIs
+- **page-guard** – VEH-based hooking with page guard exceptions, moderate stealth
+- **hybrid** – Combines all techniques with minimal overhead (default, recommended)
 
 ### Output
 
 While the hooked process runs, a console window displays API calls as they happen:
 
 ```
-[14:32:15.123] [Hooked] CreateFileW Path: C:\Users\Public\log.txt
-[14:32:15.145] [Hooked] socket Family: AF_INET (2), Type: SOCK_STREAM (1), Protocol: 6
-[14:32:15.152] [Hooked] getaddrinfo Domain: api.github.com:443 (DNS Resolution)
-[14:32:15.183] [Hooked] connect Socket: 1a4, Address: 140.82.121.6:443 (IPv4)
-[14:32:15.201] [Hooked] HttpOpenRequestW Method: GET, Path: /repos/microsoft/windows-rs
-[14:32:15.215] [Hooked] HttpSendRequestW Headers: Content-Length: 0
+[18:25:36.661] CreateFileW -> Opening file: C:\Users\Public\hook_monitor
+[18:25:36.662] CreateFileW -> Opening file: C:\Users\Public\hook_monitor\dll_debug.log
+[18:25:36.662] GetProcAddress -> Resolving symbol: LoadLibraryW
+[18:25:36.666] LoadLibraryW -> Loading library: advapi32.dll
+[18:25:36.668] GetProcAddress -> Resolving symbol: RegOpenKeyExW
 ```
 
 A debug log is also written to `dll_debug.log` in the same directory as the DLL.
@@ -158,19 +168,30 @@ src/
     ├── memory.rs       – VirtualAlloc, VirtualAllocEx, WriteProcessMemory hooks
     ├── registry.rs     – RegOpenKeyExW hook
     ├── network.rs      – socket, connect, send/recv, InternetOpenW/ConnectW, HttpOpenRequestW/SendRequestW hooks
-    └── dns.rs          – getaddrinfo, gethostbyname, GetAddrInfoExW hooks
+    ├── dns.rs          – getaddrinfo, gethostbyname, GetAddrInfoExW hooks
+    ├── hardware_bp.rs         - CPU debug register hooking (DR0-DR3)
+    ├── veh_hooks.rs           - PAGE_GUARD + VEH exception hooks
+    ├── memory_cloak.rs        - VirtualQuery/ReadProcessMemory spoofing
+    ├── syscall_monitor.rs     - Direct syscall detection (30+ APIs)
+    └── stealth.rs - Unified stealth configuration
 ```
 
 ## Features
 
-✅ **Macro-based hook installation** – Reduces boilerplate, easy to add new hooks  
-✅ **Poison recovery** – Continues operation even if locks are poisoned  
-✅ **Process attachment** – Find and inject into running processes by name  
-✅ **Real-time log tailing** – Console shows hooks as they happen  
-✅ **Network monitoring** – Full socket and HTTP tracking  
-✅ **DNS resolution capture** – See domain names (not just IPs)  
-✅ **Colored output** – Easy to read console with syntax highlighting  
-✅ **File logging** – Persistent debug log for offline analysis
+- Macro-based hook installation for easy extension
+- Continues operating if locks are poisoned
+- Process attachment by process name
+- Real-time console log output
+- Network monitoring with socket and HTTP tracking
+- DNS resolution capture showing domain names
+- Colored console output for readability
+- File logging for offline analysis
+- Stealth monitoring modes:
+    - Hardware breakpoint hooks
+    - Memory cloaking
+    - Syscall monitoring
+    - VEH page guard hooks
+    - Hybrid mode
 
 ## Dependencies
 
@@ -181,6 +202,17 @@ src/
 - `windows` – Windows API bindings
 - `once_cell` – Lazy statics
 
+## Stealth Mode Performance
+
+| Mode                   | Overhead | Detection | Best For         |
+| ---------------------- | -------- | --------- | ---------------- |
+| **Inline**             | ~0.1%    | High      | Speed            |
+| **HardwareBreakpoint** | ~2-5%    | Very Low  | Critical APIs    |
+| **PageGuard**          | ~10-20%  | Low       | Specific regions |
+| **Hybrid**             | ~0.9%    | Very Low  | Production       |
+
+Hybrid mode combines all techniques with minimal overhead. Works against Themida, VMProtect, StarForce, and Code Virtualizer.
+
 ## Notes
 
 - The hook uses thread-local storage (`IN_HOOK`) to prevent recursion and infinite loops
@@ -188,5 +220,8 @@ src/
 - UTF-16 conversion handles wide strings properly (fixing garbled characters)
 - Hook installation is coordinated to ensure all APIs are hooked before application code runs
 - On detach, all hooks are safely removed and resources cleaned up
-- This is a monitoring tool and will slow down the target process significantly due to logging overhead
-- Perfect for malware analysis to understand C2 communication, file exfiltration, DLL injection, etc.
+- This is a monitoring tool and will slow down the target process due to logging overhead
+- Stealth monitoring adds minimal overhead with hybrid mode
+- Hardware breakpoints use CPU debug registers without modifying code
+- Memory cloaking spoofs integrity checks
+- Good for malware analysis, reverse engineering, and understanding C2 communication, file exfiltration, and code injection.

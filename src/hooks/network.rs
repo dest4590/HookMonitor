@@ -168,7 +168,6 @@ pub unsafe extern "system" fn hooked_internet_connect_w(
     )
 }
 
-// --- HttpOpenRequestW (WinInet) ---
 pub type FnHttpOpenRequestW = unsafe extern "system" fn(
     *mut std::ffi::c_void,
     PCWSTR,
