@@ -1,6 +1,12 @@
-# Hook Monitor
+<div align=center>
 
-A Windows DLL that monitors and logs API calls made by a target process. Useful for understanding what an application is doing at runtime, or catching unexpected behavior.
+<img width="256" src="https://github.com/user-attachments/assets/b998588d-1a4c-48cf-b727-d9488f9e1746" />
+
+<h1>Hook Monitor</h1>
+
+<h3>A Windows DLL that monitors and logs API calls made by a target process. Useful for understanding what an application is doing at runtime, or catching unexpected behavior.</h3>
+  
+</div> 
 
 ## What It Does
 
