@@ -1,4 +1,5 @@
 use crate::hooks::common::*;
+use crate::{install_detour, remove_detour};
 
 pub type FnCreateFileW = unsafe extern "system" fn(
     PCWSTR,
@@ -73,30 +74,10 @@ pub unsafe extern "system" fn hooked(
 }
 
 pub unsafe fn install(k32: HMODULE) -> Result<(), String> {
-    if let Some(proc) = GetProcAddress(k32, s!("CreateFileW")) {
-        let target: FnCreateFileW = std::mem::transmute(proc);
-        if let Ok(hook) = GenericDetour::new(target, hooked) {
-            let _ = hook.enable();
-            match HOOK.lock() {
-                Ok(mut guard) => {
-                    *guard = Some(hook);
-                    Ok(())
-                }
-                Err(poisoned) => {
-                    log_debug("CreateFileW hook mutex poisoned, recovering");
-                    let mut guard = poisoned.into_inner();
-                    *guard = Some(hook);
-                    Ok(())
-                }
-            }
-        } else {
-            Err("Failed to create GenericDetour for CreateFileW".to_string())
-        }
-    } else {
-        Err("CreateFileW not found in kernel32.dll".to_string())
-    }
+    install_detour!(k32, "CreateFileW", FnCreateFileW, hooked, &HOOK);
+    Ok(())
 }
 
 pub unsafe fn remove() {
-    HOOK.lock().unwrap().take().map(|h| h.disable());
+    remove_detour!(&HOOK);
 }

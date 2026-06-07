@@ -1,4 +1,4 @@
-use crate::hooks::common::*;
+use crate::{call_hooked, hooks::common::*, install_detour, log_hooked_call, remove_detour};
 
 // --- socket (WinSock2) ---
 pub type FnSocket = unsafe extern "system" fn(i32, i32, i32) -> usize;
@@ -17,30 +17,19 @@ pub unsafe extern "system" fn hooked_socket(af: i32, socket_type: i32, protocol:
         _ => "UNKNOWN",
     };
 
-    if !IN_HOOK.with(|h| h.get()) {
-        IN_HOOK.with(|h| h.set(true));
-        log_hook(
-            "socket",
-            &format!(
-                "Family: {} ({}), Type: {} ({}), Protocol: {}",
-                af_str, af, type_str, socket_type, protocol
-            ),
-        );
-        IN_HOOK.with(|h| h.set(false));
-    }
+    log_hooked_call!(
+        "socket",
+        &format!(
+            "Family: {} ({}), Type: {} ({}), Protocol: {}",
+            af_str, af, type_str, socket_type, protocol
+        )
+    );
 
-    match HOOK_SOCKET.lock() {
-        Ok(guard) => guard
-            .as_ref()
-            .map_or_else(|| 0, |detour| detour.call(af, socket_type, protocol)),
-        Err(poisoned) => {
-            log_debug("socket mutex poisoned");
-            let guard = poisoned.into_inner();
-            guard
-                .as_ref()
-                .map_or_else(|| 0, |detour| detour.call(af, socket_type, protocol))
-        }
-    }
+    call_hooked!(
+        HOOK_SOCKET,
+        |detour| detour.call(af, socket_type, protocol),
+        0
+    )
 }
 
 // --- connect (WinSock2) ---
@@ -67,27 +56,16 @@ pub unsafe extern "system" fn hooked_connect(socket: usize, name: *const u8, nam
         "NULL/Invalid".to_string()
     };
 
-    if !IN_HOOK.with(|h| h.get()) {
-        IN_HOOK.with(|h| h.set(true));
-        log_hook(
-            "connect",
-            &format!("Socket: {:x}, Address: {}", socket, addr_str.cyan()),
-        );
-        IN_HOOK.with(|h| h.set(false));
-    }
+    log_hooked_call!(
+        "connect",
+        &format!("Socket: {:x}, Address: {}", socket, addr_str.cyan())
+    );
 
-    match HOOK_CONNECT.lock() {
-        Ok(guard) => guard
-            .as_ref()
-            .map_or_else(|| -1, |detour| detour.call(socket, name, namelen)),
-        Err(poisoned) => {
-            log_debug("connect mutex poisoned");
-            let guard = poisoned.into_inner();
-            guard
-                .as_ref()
-                .map_or_else(|| -1, |detour| detour.call(socket, name, namelen))
-        }
-    }
+    call_hooked!(
+        HOOK_CONNECT,
+        |detour| detour.call(socket, name, namelen),
+        -1
+    )
 }
 
 // --- InternetOpenW (WinInet) ---
@@ -111,45 +89,24 @@ pub unsafe extern "system" fn hooked_internet_open_w(
         _ => "UNKNOWN",
     };
 
-    if !IN_HOOK.with(|h| h.get()) {
-        IN_HOOK.with(|h| h.set(true));
-        log_hook(
-            "InternetOpenW",
-            &format!("Agent: {}, AccessType: {}", agent.magenta(), access_type),
-        );
-        IN_HOOK.with(|h| h.set(false));
-    }
+    log_hooked_call!(
+        "InternetOpenW",
+        &format!("Agent: {}, AccessType: {}", agent.magenta(), access_type)
+    );
 
-    match HOOK_INTERNET_OPEN.lock() {
-        Ok(guard) => guard.as_ref().map_or_else(
-            || std::ptr::null_mut(),
-            |detour| {
-                detour.call(
-                    lpsz_agent,
-                    dw_access_type,
-                    lpsz_proxy,
-                    lpsz_proxy_bypass,
-                    dw_flags,
-                )
-            },
-        ),
-        Err(poisoned) => {
-            log_debug("InternetOpenW mutex poisoned");
-            let guard = poisoned.into_inner();
-            guard.as_ref().map_or_else(
-                || std::ptr::null_mut(),
-                |detour| {
-                    detour.call(
-                        lpsz_agent,
-                        dw_access_type,
-                        lpsz_proxy,
-                        lpsz_proxy_bypass,
-                        dw_flags,
-                    )
-                },
+    call_hooked!(
+        HOOK_INTERNET_OPEN,
+        |detour| {
+            detour.call(
+                lpsz_agent,
+                dw_access_type,
+                lpsz_proxy,
+                lpsz_proxy_bypass,
+                dw_flags,
             )
-        }
-    }
+        },
+        std::ptr::null_mut()
+    )
 }
 
 // --- InternetConnectW (WinInet) ---
@@ -183,56 +140,32 @@ pub unsafe extern "system" fn hooked_internet_connect_w(
         _ => "UNKNOWN",
     };
 
-    if !IN_HOOK.with(|h| h.get()) {
-        IN_HOOK.with(|h| h.set(true));
-        log_hook(
-            "InternetConnectW",
-            &format!(
-                "Domain: {}:{} ({})",
-                server.cyan().bold(),
-                n_server_port,
-                service
-            ),
-        );
-        IN_HOOK.with(|h| h.set(false));
-    }
+    log_hooked_call!(
+        "InternetConnectW",
+        &format!(
+            "Domain: {}:{} ({})",
+            server.cyan().bold(),
+            n_server_port,
+            service
+        )
+    );
 
-    match HOOK_INTERNET_CONNECT.lock() {
-        Ok(guard) => guard.as_ref().map_or_else(
-            || std::ptr::null_mut(),
-            |detour| {
-                detour.call(
-                    h_internet,
-                    lpsz_server_name,
-                    n_server_port,
-                    lpsz_user_name,
-                    lpsz_password,
-                    dw_service,
-                    dw_flags,
-                    dw_context,
-                )
-            },
-        ),
-        Err(poisoned) => {
-            log_debug("InternetConnectW mutex poisoned");
-            let guard = poisoned.into_inner();
-            guard.as_ref().map_or_else(
-                || std::ptr::null_mut(),
-                |detour| {
-                    detour.call(
-                        h_internet,
-                        lpsz_server_name,
-                        n_server_port,
-                        lpsz_user_name,
-                        lpsz_password,
-                        dw_service,
-                        dw_flags,
-                        dw_context,
-                    )
-                },
+    call_hooked!(
+        HOOK_INTERNET_CONNECT,
+        |detour| {
+            detour.call(
+                h_internet,
+                lpsz_server_name,
+                n_server_port,
+                lpsz_user_name,
+                lpsz_password,
+                dw_service,
+                dw_flags,
+                dw_context,
             )
-        }
-    }
+        },
+        std::ptr::null_mut()
+    )
 }
 
 // --- HttpOpenRequestW (WinInet) ---
@@ -260,58 +193,34 @@ pub unsafe extern "system" fn hooked_http_open_request_w(
 ) -> *mut std::ffi::c_void {
     let verb = pcwstr_to_string(lpsz_verb);
     let path = pcwstr_to_string(lpsz_object_name);
+    let referrer = pcwstr_to_string(lpsz_referrer);
 
-    if !IN_HOOK.with(|h| h.get()) {
-        IN_HOOK.with(|h| h.set(true));
-        let referrer = pcwstr_to_string(lpsz_referrer);
-        log_hook(
-            "HttpOpenRequestW",
-            &format!(
-                "Method: {} {}, Referrer: {}",
-                verb.bright_yellow(),
-                path.cyan(),
-                referrer.bright_black()
-            ),
-        );
-        IN_HOOK.with(|h| h.set(false));
-    }
+    log_hooked_call!(
+        "HttpOpenRequestW",
+        &format!(
+            "Method: {} {}, Referrer: {}",
+            verb.bright_yellow(),
+            path.cyan(),
+            referrer.bright_black()
+        )
+    );
 
-    match HOOK_HTTP_OPEN_REQUEST.lock() {
-        Ok(guard) => guard.as_ref().map_or_else(
-            || std::ptr::null_mut(),
-            |detour| {
-                detour.call(
-                    h_connect,
-                    lpsz_verb,
-                    lpsz_object_name,
-                    lpsz_version,
-                    lpsz_referrer,
-                    lplpsz_accept_types,
-                    dw_flags,
-                    dw_context,
-                )
-            },
-        ),
-        Err(poisoned) => {
-            log_debug("HttpOpenRequestW mutex poisoned");
-            let guard = poisoned.into_inner();
-            guard.as_ref().map_or_else(
-                || std::ptr::null_mut(),
-                |detour| {
-                    detour.call(
-                        h_connect,
-                        lpsz_verb,
-                        lpsz_object_name,
-                        lpsz_version,
-                        lpsz_referrer,
-                        lplpsz_accept_types,
-                        dw_flags,
-                        dw_context,
-                    )
-                },
+    call_hooked!(
+        HOOK_HTTP_OPEN_REQUEST,
+        |detour| {
+            detour.call(
+                h_connect,
+                lpsz_verb,
+                lpsz_object_name,
+                lpsz_version,
+                lpsz_referrer,
+                lplpsz_accept_types,
+                dw_flags,
+                dw_context,
             )
-        }
-    }
+        },
+        std::ptr::null_mut()
+    )
 }
 
 // --- HttpSendRequestW (WinInet) ---
@@ -334,51 +243,28 @@ pub unsafe extern "system" fn hooked_http_send_request_w(
         "0B".to_string()
     };
 
-    if !IN_HOOK.with(|h| h.get()) {
-        IN_HOOK.with(|h| h.set(true));
+    log_hooked_call!(
+        "HttpSendRequestW",
+        &format!(
+            "Headers: {}, Body: {}",
+            headers.bright_black(),
+            body_preview.yellow()
+        )
+    );
 
-        log_hook(
-            "HttpSendRequestW",
-            &format!(
-                "Headers: {}, Body: {}",
-                headers.bright_black(),
-                body_preview.yellow()
-            ),
-        );
-
-        IN_HOOK.with(|h| h.set(false));
-    }
-
-    match HOOK_HTTP_SEND_REQUEST.lock() {
-        Ok(guard) => guard.as_ref().map_or_else(
-            || BOOL::default(),
-            |detour| {
-                detour.call(
-                    h_request,
-                    lpsz_headers,
-                    dw_headers_length,
-                    lpopt_ional,
-                    dw_optional_length,
-                )
-            },
-        ),
-        Err(poisoned) => {
-            log_debug("HttpSendRequestW mutex poisoned");
-            let guard = poisoned.into_inner();
-            guard.as_ref().map_or_else(
-                || BOOL::default(),
-                |detour| {
-                    detour.call(
-                        h_request,
-                        lpsz_headers,
-                        dw_headers_length,
-                        lpopt_ional,
-                        dw_optional_length,
-                    )
-                },
+    call_hooked!(
+        HOOK_HTTP_SEND_REQUEST,
+        |detour| {
+            detour.call(
+                h_request,
+                lpsz_headers,
+                dw_headers_length,
+                lpopt_ional,
+                dw_optional_length,
             )
-        }
-    }
+        },
+        BOOL::default()
+    )
 }
 
 pub unsafe fn install(_k32: HMODULE) -> Result<(), String> {
@@ -389,33 +275,8 @@ pub unsafe fn install(_k32: HMODULE) -> Result<(), String> {
         }
     };
 
-    if let Some(proc) = GetProcAddress(ws2, s!("socket")) {
-        let target: FnSocket = std::mem::transmute(proc);
-        if let Ok(hook) = GenericDetour::new(target, hooked_socket) {
-            let _ = hook.enable();
-            match HOOK_SOCKET.lock() {
-                Ok(mut guard) => *guard = Some(hook),
-                Err(poisoned) => {
-                    let mut guard = poisoned.into_inner();
-                    *guard = Some(hook);
-                }
-            }
-        }
-    }
-
-    if let Some(proc) = GetProcAddress(ws2, s!("connect")) {
-        let target: FnConnect = std::mem::transmute(proc);
-        if let Ok(hook) = GenericDetour::new(target, hooked_connect) {
-            let _ = hook.enable();
-            match HOOK_CONNECT.lock() {
-                Ok(mut guard) => *guard = Some(hook),
-                Err(poisoned) => {
-                    let mut guard = poisoned.into_inner();
-                    *guard = Some(hook);
-                }
-            }
-        }
-    }
+    install_detour!(ws2, "socket", FnSocket, hooked_socket, &HOOK_SOCKET);
+    install_detour!(ws2, "connect", FnConnect, hooked_connect, &HOOK_CONNECT);
 
     let wininet = match LoadLibraryW(windows::core::w!("wininet.dll")) {
         Ok(h) => h,
@@ -424,88 +285,43 @@ pub unsafe fn install(_k32: HMODULE) -> Result<(), String> {
         }
     };
 
-    if let Some(proc) = GetProcAddress(wininet, s!("InternetOpenW")) {
-        let target: FnInternetOpenW = std::mem::transmute(proc);
-        if let Ok(hook) = GenericDetour::new(target, hooked_internet_open_w) {
-            let _ = hook.enable();
-            match HOOK_INTERNET_OPEN.lock() {
-                Ok(mut guard) => *guard = Some(hook),
-                Err(poisoned) => {
-                    let mut guard = poisoned.into_inner();
-                    *guard = Some(hook);
-                }
-            }
-        }
-    }
-
-    if let Some(proc) = GetProcAddress(wininet, s!("InternetConnectW")) {
-        let target: FnInternetConnectW = std::mem::transmute(proc);
-        if let Ok(hook) = GenericDetour::new(target, hooked_internet_connect_w) {
-            let _ = hook.enable();
-            match HOOK_INTERNET_CONNECT.lock() {
-                Ok(mut guard) => *guard = Some(hook),
-                Err(poisoned) => {
-                    let mut guard = poisoned.into_inner();
-                    *guard = Some(hook);
-                }
-            }
-        }
-    }
-
-    if let Some(proc) = GetProcAddress(wininet, s!("HttpOpenRequestW")) {
-        let target: FnHttpOpenRequestW = std::mem::transmute(proc);
-        if let Ok(hook) = GenericDetour::new(target, hooked_http_open_request_w) {
-            let _ = hook.enable();
-            match HOOK_HTTP_OPEN_REQUEST.lock() {
-                Ok(mut guard) => *guard = Some(hook),
-                Err(poisoned) => {
-                    let mut guard = poisoned.into_inner();
-                    *guard = Some(hook);
-                }
-            }
-        }
-    }
-
-    if let Some(proc) = GetProcAddress(wininet, s!("HttpSendRequestW")) {
-        let target: FnHttpSendRequestW = std::mem::transmute(proc);
-        if let Ok(hook) = GenericDetour::new(target, hooked_http_send_request_w) {
-            let _ = hook.enable();
-            match HOOK_HTTP_SEND_REQUEST.lock() {
-                Ok(mut guard) => *guard = Some(hook),
-                Err(poisoned) => {
-                    let mut guard = poisoned.into_inner();
-                    *guard = Some(hook);
-                }
-            }
-        }
-    }
+    install_detour!(
+        wininet,
+        "InternetOpenW",
+        FnInternetOpenW,
+        hooked_internet_open_w,
+        &HOOK_INTERNET_OPEN
+    );
+    install_detour!(
+        wininet,
+        "InternetConnectW",
+        FnInternetConnectW,
+        hooked_internet_connect_w,
+        &HOOK_INTERNET_CONNECT
+    );
+    install_detour!(
+        wininet,
+        "HttpOpenRequestW",
+        FnHttpOpenRequestW,
+        hooked_http_open_request_w,
+        &HOOK_HTTP_OPEN_REQUEST
+    );
+    install_detour!(
+        wininet,
+        "HttpSendRequestW",
+        FnHttpSendRequestW,
+        hooked_http_send_request_w,
+        &HOOK_HTTP_SEND_REQUEST
+    );
 
     Ok(())
 }
 
 pub unsafe fn remove() {
-    HOOK_SOCKET
-        .lock()
-        .ok()
-        .and_then(|mut g| g.take().map(|h| h.disable()));
-    HOOK_CONNECT
-        .lock()
-        .ok()
-        .and_then(|mut g| g.take().map(|h| h.disable()));
-    HOOK_INTERNET_OPEN
-        .lock()
-        .ok()
-        .and_then(|mut g| g.take().map(|h| h.disable()));
-    HOOK_INTERNET_CONNECT
-        .lock()
-        .ok()
-        .and_then(|mut g| g.take().map(|h| h.disable()));
-    HOOK_HTTP_OPEN_REQUEST
-        .lock()
-        .ok()
-        .and_then(|mut g| g.take().map(|h| h.disable()));
-    HOOK_HTTP_SEND_REQUEST
-        .lock()
-        .ok()
-        .and_then(|mut g| g.take().map(|h| h.disable()));
+    remove_detour!(&HOOK_SOCKET);
+    remove_detour!(&HOOK_CONNECT);
+    remove_detour!(&HOOK_INTERNET_OPEN);
+    remove_detour!(&HOOK_INTERNET_CONNECT);
+    remove_detour!(&HOOK_HTTP_OPEN_REQUEST);
+    remove_detour!(&HOOK_HTTP_SEND_REQUEST);
 }

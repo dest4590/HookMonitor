@@ -1,4 +1,5 @@
 use crate::hooks::common::*;
+use crate::{install_detour, remove_detour};
 
 // --- RegOpenKeyExW ---
 pub type FnRegOpenKeyExW =
@@ -41,37 +42,13 @@ pub unsafe extern "system" fn hooked_reg_open_key_ex_w(
 }
 
 pub unsafe fn install(_k32: HMODULE) -> Result<(), String> {
-    if let Ok(advapi) = LoadLibraryW(windows::core::w!("advapi32.dll")) {
-        if let Some(proc) = GetProcAddress(advapi, s!("RegOpenKeyExW")) {
-            let target: FnRegOpenKeyExW = std::mem::transmute(proc);
-            if let Ok(hook) = GenericDetour::new(target, hooked_reg_open_key_ex_w) {
-                let _ = hook.enable();
-                match HOOK_ROK.lock() {
-                    Ok(mut guard) => {
-                        *guard = Some(hook);
-                        Ok(())
-                    }
-                    Err(poisoned) => {
-                        log_debug("RegOpenKeyExW mutex poisoned during install");
-                        let mut guard = poisoned.into_inner();
-                        *guard = Some(hook);
-                        Ok(())
-                    }
-                }
-            } else {
-                Err("Failed to create GenericDetour for RegOpenKeyExW".to_string())
-            }
-        } else {
-            Err("RegOpenKeyExW not found in advapi32.dll".to_string())
-        }
-    } else {
-        Err("Failed to load advapi32.dll".to_string())
-    }
+    let advapi = LoadLibraryW(windows::core::w!("advapi32.dll"))
+        .map_err(|_| "Failed to load advapi32.dll")?;
+    
+    install_detour!(advapi, "RegOpenKeyExW", FnRegOpenKeyExW, hooked_reg_open_key_ex_w, &HOOK_ROK);
+    Ok(())
 }
 
 pub unsafe fn remove() {
-    HOOK_ROK
-        .lock()
-        .ok()
-        .and_then(|mut g| g.take().map(|h| h.disable()));
+    remove_detour!(&HOOK_ROK);
 }

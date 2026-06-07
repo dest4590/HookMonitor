@@ -1,4 +1,5 @@
 use crate::hooks::common::*;
+use crate::{install_detour, remove_detour};
 
 // --- VirtualAlloc ---
 pub type FnVirtualAlloc = unsafe extern "system" fn(
@@ -164,85 +165,14 @@ pub unsafe extern "system" fn hooked_write_process_memory(
 }
 
 pub unsafe fn install(k32: HMODULE) -> Result<(), String> {
-    let mut va_ok = false;
-    let mut vae_ok = false;
-    let mut wpm_ok = false;
-
-    if let Some(proc) = GetProcAddress(k32, s!("VirtualAlloc")) {
-        let target: FnVirtualAlloc = std::mem::transmute(proc);
-        if let Ok(hook) = GenericDetour::new(target, hooked_virtual_alloc) {
-            let _ = hook.enable();
-            match HOOK_VA.lock() {
-                Ok(mut guard) => {
-                    *guard = Some(hook);
-                    va_ok = true;
-                }
-                Err(poisoned) => {
-                    log_debug("VirtualAlloc mutex poisoned during install");
-                    let mut guard = poisoned.into_inner();
-                    *guard = Some(hook);
-                    va_ok = true;
-                }
-            }
-        }
-    }
-
-    if let Some(proc) = GetProcAddress(k32, s!("VirtualAllocEx")) {
-        let target: FnVirtualAllocEx = std::mem::transmute(proc);
-        if let Ok(hook) = GenericDetour::new(target, hooked_virtual_alloc_ex) {
-            let _ = hook.enable();
-            match HOOK_VAE.lock() {
-                Ok(mut guard) => {
-                    *guard = Some(hook);
-                    vae_ok = true;
-                }
-                Err(poisoned) => {
-                    log_debug("VirtualAllocEx mutex poisoned during install");
-                    let mut guard = poisoned.into_inner();
-                    *guard = Some(hook);
-                    vae_ok = true;
-                }
-            }
-        }
-    }
-
-    if let Some(proc) = GetProcAddress(k32, s!("WriteProcessMemory")) {
-        let target: FnWriteProcessMemory = std::mem::transmute(proc);
-        if let Ok(hook) = GenericDetour::new(target, hooked_write_process_memory) {
-            let _ = hook.enable();
-            match HOOK_WPM.lock() {
-                Ok(mut guard) => {
-                    *guard = Some(hook);
-                    wpm_ok = true;
-                }
-                Err(poisoned) => {
-                    log_debug("WriteProcessMemory mutex poisoned during install");
-                    let mut guard = poisoned.into_inner();
-                    *guard = Some(hook);
-                    wpm_ok = true;
-                }
-            }
-        }
-    }
-
-    if va_ok || vae_ok || wpm_ok {
-        Ok(())
-    } else {
-        Err("Failed to install memory hooks".to_string())
-    }
+    install_detour!(k32, "VirtualAlloc", FnVirtualAlloc, hooked_virtual_alloc, &HOOK_VA);
+    install_detour!(k32, "VirtualAllocEx", FnVirtualAllocEx, hooked_virtual_alloc_ex, &HOOK_VAE);
+    install_detour!(k32, "WriteProcessMemory", FnWriteProcessMemory, hooked_write_process_memory, &HOOK_WPM);
+    Ok(())
 }
 
 pub unsafe fn remove() {
-    HOOK_VA
-        .lock()
-        .ok()
-        .and_then(|mut g| g.take().map(|h| h.disable()));
-    HOOK_VAE
-        .lock()
-        .ok()
-        .and_then(|mut g| g.take().map(|h| h.disable()));
-    HOOK_WPM
-        .lock()
-        .ok()
-        .and_then(|mut g| g.take().map(|h| h.disable()));
+    remove_detour!(&HOOK_VA);
+    remove_detour!(&HOOK_VAE);
+    remove_detour!(&HOOK_WPM);
 }

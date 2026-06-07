@@ -1,4 +1,5 @@
 use crate::hooks::common::*;
+use crate::{install_detour, remove_detour};
 
 // --- GetProcAddress ---
 pub type FnGetProcAddress = unsafe extern "system" fn(HMODULE, PCSTR) -> *const std::ffi::c_void;
@@ -70,61 +71,12 @@ pub unsafe extern "system" fn hooked_load_library_w(lp_lib_file_name: PCWSTR) ->
 }
 
 pub unsafe fn install(k32: HMODULE) -> Result<(), String> {
-    let mut gpa_ok = false;
-    let mut ll_ok = false;
-
-    if let Some(proc) = GetProcAddress(k32, s!("GetProcAddress")) {
-        let target: FnGetProcAddress = std::mem::transmute(proc);
-        if let Ok(hook) = GenericDetour::new(target, hooked_get_proc_address) {
-            let _ = hook.enable();
-            match HOOK_GPA.lock() {
-                Ok(mut guard) => {
-                    *guard = Some(hook);
-                    gpa_ok = true;
-                }
-                Err(poisoned) => {
-                    log_debug("GetProcAddress mutex poisoned during install");
-                    let mut guard = poisoned.into_inner();
-                    *guard = Some(hook);
-                    gpa_ok = true;
-                }
-            }
-        }
-    }
-
-    if let Some(proc) = GetProcAddress(k32, s!("LoadLibraryW")) {
-        let target: FnLoadLibraryW = std::mem::transmute(proc);
-        if let Ok(hook) = GenericDetour::new(target, hooked_load_library_w) {
-            let _ = hook.enable();
-            match HOOK_LL.lock() {
-                Ok(mut guard) => {
-                    *guard = Some(hook);
-                    ll_ok = true;
-                }
-                Err(poisoned) => {
-                    log_debug("LoadLibraryW mutex poisoned during install");
-                    let mut guard = poisoned.into_inner();
-                    *guard = Some(hook);
-                    ll_ok = true;
-                }
-            }
-        }
-    }
-
-    if gpa_ok || ll_ok {
-        Ok(())
-    } else {
-        Err("Failed to install library hooks".to_string())
-    }
+    install_detour!(k32, "GetProcAddress", FnGetProcAddress, hooked_get_proc_address, &HOOK_GPA);
+    install_detour!(k32, "LoadLibraryW", FnLoadLibraryW, hooked_load_library_w, &HOOK_LL);
+    Ok(())
 }
 
 pub unsafe fn remove() {
-    HOOK_GPA
-        .lock()
-        .ok()
-        .and_then(|mut g| g.take().map(|h| h.disable()));
-    HOOK_LL
-        .lock()
-        .ok()
-        .and_then(|mut g| g.take().map(|h| h.disable()));
+    remove_detour!(&HOOK_GPA);
+    remove_detour!(&HOOK_LL);
 }

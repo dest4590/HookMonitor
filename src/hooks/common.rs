@@ -90,3 +90,98 @@ pub unsafe fn pcwstr_to_string(ptr: PCWSTR) -> String {
 
     String::from_utf16_lossy(&wide_chars).to_owned()
 }
+
+#[macro_export]
+macro_rules! get_function_ptr {
+    ($module:expr, $fn_name:expr, $fn_type:ty) => {{
+        match GetProcAddress($module, $crate::hooks::common::s($fn_name)) {
+            Some(fn_ptr) => {
+                let fn_ptr: $fn_type = std::mem::transmute(fn_ptr);
+                Ok(fn_ptr)
+            }
+            None => Err(anyhow::anyhow!("Failed to get {}", $fn_name)),
+        }
+    }};
+}
+
+#[macro_export]
+macro_rules! install_hook {
+    ($detour:expr, $original_fn:expr, $hooked_fn:expr, $hook_name:expr) => {{
+        match unsafe { $detour.enable() } {
+            Ok(_) => {
+                $crate::hooks::common::log_debug(&format!("{} hook installed", $hook_name));
+                Ok(())
+            }
+            Err(e) => {
+                let msg = format!("Failed to enable {} hook: {:?}", $hook_name, e);
+                $crate::hooks::common::log_debug(&msg);
+                Err(anyhow::anyhow!(msg))
+            }
+        }
+    }};
+}
+
+#[macro_export]
+macro_rules! remove_hook {
+    ($detour:expr, $hook_name:expr) => {{
+        if let Err(e) = unsafe { $detour.disable() } {
+            $crate::hooks::common::log_debug(&format!(
+                "Warning: Failed to disable {} hook: {:?}",
+                $hook_name, e
+            ));
+        }
+    }};
+}
+
+#[macro_export]
+macro_rules! log_hooked_call {
+    ($hook_name:expr, $details:expr) => {{
+        if !$crate::hooks::common::IN_HOOK.with(|h| h.get()) {
+            $crate::hooks::common::IN_HOOK.with(|h| h.set(true));
+            $crate::hooks::common::log_hook($hook_name, $details);
+            $crate::hooks::common::IN_HOOK.with(|h| h.set(false));
+        }
+    }};
+}
+
+#[macro_export]
+macro_rules! call_hooked {
+    ($mutex:expr, $detour_call:expr, $fallback:expr) => {{
+        match $mutex.lock() {
+            Ok(guard) => guard.as_ref().map_or_else(|| $fallback, $detour_call),
+            Err(poisoned) => {
+                $crate::hooks::common::log_debug("mutex poisoned");
+                let guard = poisoned.into_inner();
+                guard.as_ref().map_or_else(|| $fallback, $detour_call)
+            }
+        }
+    }};
+}
+
+#[macro_export]
+macro_rules! install_detour {
+    ($module:expr, $fn_name:expr, $fn_type:ty, $hooked:expr, $hook_static:expr) => {{
+        use windows::core::s;
+        if let Some(proc) = GetProcAddress($module, s!($fn_name)) {
+            let target: $fn_type = std::mem::transmute(proc);
+            if let Ok(hook) = GenericDetour::new(target, $hooked) {
+                let _ = hook.enable();
+                match $hook_static.lock() {
+                    Ok(mut guard) => *guard = Some(hook),
+                    Err(poisoned) => {
+                        let mut guard = poisoned.into_inner();
+                        *guard = Some(hook);
+                    }
+                }
+            }
+        }
+    }};
+}
+
+#[macro_export]
+macro_rules! remove_detour {
+    ($hook_static:expr) => {{
+        let mut guard = $hook_static.lock().unwrap_or_else(|e| e.into_inner());
+        let _ = guard.take().map(|h| h.disable());
+    }};
+}

@@ -1,4 +1,5 @@
 use crate::hooks::common::*;
+use crate::{install_detour, remove_detour};
 
 // --- CreateProcessW ---
 pub type FnCreateProcessW = unsafe extern "system" fn(
@@ -114,61 +115,12 @@ pub unsafe extern "system" fn hooked_terminate_process(
 }
 
 pub unsafe fn install(k32: HMODULE) -> Result<(), String> {
-    let mut cp_ok = false;
-    let mut tp_ok = false;
-
-    if let Some(proc) = GetProcAddress(k32, s!("CreateProcessW")) {
-        let target: FnCreateProcessW = std::mem::transmute(proc);
-        if let Ok(hook) = GenericDetour::new(target, hooked_create_process_w) {
-            let _ = hook.enable();
-            match HOOK_CP.lock() {
-                Ok(mut guard) => {
-                    *guard = Some(hook);
-                    cp_ok = true;
-                }
-                Err(poisoned) => {
-                    log_debug("CreateProcessW mutex poisoned during install");
-                    let mut guard = poisoned.into_inner();
-                    *guard = Some(hook);
-                    cp_ok = true;
-                }
-            }
-        }
-    }
-
-    if let Some(proc) = GetProcAddress(k32, s!("TerminateProcess")) {
-        let target: FnTerminateProcess = std::mem::transmute(proc);
-        if let Ok(hook) = GenericDetour::new(target, hooked_terminate_process) {
-            let _ = hook.enable();
-            match HOOK_TP.lock() {
-                Ok(mut guard) => {
-                    *guard = Some(hook);
-                    tp_ok = true;
-                }
-                Err(poisoned) => {
-                    log_debug("TerminateProcess mutex poisoned during install");
-                    let mut guard = poisoned.into_inner();
-                    *guard = Some(hook);
-                    tp_ok = true;
-                }
-            }
-        }
-    }
-
-    if cp_ok || tp_ok {
-        Ok(())
-    } else {
-        Err("Failed to install process hooks".to_string())
-    }
+    install_detour!(k32, "CreateProcessW", FnCreateProcessW, hooked_create_process_w, &HOOK_CP);
+    install_detour!(k32, "TerminateProcess", FnTerminateProcess, hooked_terminate_process, &HOOK_TP);
+    Ok(())
 }
 
 pub unsafe fn remove() {
-    HOOK_CP
-        .lock()
-        .ok()
-        .and_then(|mut g| g.take().map(|h| h.disable()));
-    HOOK_TP
-        .lock()
-        .ok()
-        .and_then(|mut g| g.take().map(|h| h.disable()));
+    remove_detour!(&HOOK_CP);
+    remove_detour!(&HOOK_TP);
 }
