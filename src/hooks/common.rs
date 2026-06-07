@@ -53,12 +53,6 @@ pub fn log_debug(msg: &str) {
 }
 
 pub fn log_hook(name: &str, details: &str) {
-    if IN_HOOK.with(|h| h.get()) {
-        return;
-    }
-
-    IN_HOOK.with(|h| h.set(true));
-
     let now = Local::now().format("%H:%M:%S%.3f");
     if !name.contains("GetMessage")
         && !name.contains("CreateWindow")
@@ -76,6 +70,23 @@ pub fn log_hook(name: &str, details: &str) {
             details
         );
     }
+}
 
-    IN_HOOK.with(|h| h.set(false));
+pub unsafe fn pcwstr_to_string(ptr: PCWSTR) -> String {
+    if ptr.is_null() {
+        return "NULL".to_string();
+    }
+
+    let mut wide_chars = Vec::new();
+    let mut offset = 0;
+    loop {
+        let ch = *(ptr.as_ptr().add(offset));
+        if ch == 0 {
+            break;
+        }
+        wide_chars.push(ch);
+        offset += 1;
+    }
+
+    String::from_utf16_lossy(&wide_chars).to_owned()
 }

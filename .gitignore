@@ -1,2 +1,4 @@
 /target
 dll_debug.log
+
+*.exe
