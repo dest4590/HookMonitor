@@ -29,23 +29,24 @@ macro_rules! with_recursion_guard {
     };
 }
 
-static LOG_PATH: once_cell::sync::Lazy<String> = once_cell::sync::Lazy::new(|| {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| {
-            p.parent()
-                .map(|d| d.join("dll_debug.log").to_string_lossy().into_owned())
-        })
-        .unwrap_or_else(|| r"C:\hook_monitor\dll_debug.log".to_owned())
-});
+static LOG_PATH: once_cell::sync::Lazy<String> =
+    once_cell::sync::Lazy::new(|| r"C:\Users\Public\hook_monitor\dll_debug.log".to_owned());
 
 pub fn log_debug(msg: &str) {
     use std::fs::OpenOptions;
     use std::io::Write;
+    use std::path::Path;
+
+    let log_path_str = LOG_PATH.as_str();
+
+    if let Some(parent) = Path::new(log_path_str).parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
     if let Ok(mut file) = OpenOptions::new()
         .create(true)
         .append(true)
-        .open(LOG_PATH.as_str())
+        .open(log_path_str)
     {
         let now = Local::now().format("%H:%M:%S%.3f");
         let _ = writeln!(file, "[{now}] {msg}");

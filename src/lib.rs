@@ -56,7 +56,6 @@ unsafe extern "system" fn init_thread(_param: *mut c_void) -> u32 {
     }
 
     HOOKS_INITIALIZED.store(true, Ordering::Release);
-    eprintln!("[DEBUG] HOOKS_INITIALIZED flag set to true");
 
     0
 }
