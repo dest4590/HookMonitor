@@ -14,6 +14,10 @@ The hooked functions include:
 - **Memory operations** – VirtualAlloc, VirtualAllocEx, and WriteProcessMemory reveal memory allocation and modification
 - **Registry access** – RegOpenKeyExW logs registry key access
 
+### Example
+
+<img width="960" height="480" alt="image" src="https://github.com/user-attachments/assets/d7799471-0c00-4101-b7e6-b5eefd1fa587" />
+
 ## How to Use
 
 ### Building
